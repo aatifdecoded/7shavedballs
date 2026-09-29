@@ -1,0 +1,1542 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%231B2420%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2214%22%20fill%3D%22%23E2A233%22%2F%3E%3C%2Fsvg%3E" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>7 shaved balls</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+  rel="stylesheet"
+/>
+<!--
+  Firebase console setup required before this works (one time, in your Firebase project):
+  1. Authentication -> Sign-in method -> enable Email/Password.
+  2. Realtime Database -> Rules -> paste in a rules document that restricts access to
+     signed-in users and lets people only edit their own profile, messages, reactions
+     and read receipts. Ask for database.rules.json again if you don't have it handy.
+  This file also needs to be served over http(s), not opened directly as a file:// URL
+  -- browsers block ES module imports from file://. Any static server works, e.g.
+  `npx serve .` or VS Code's Live Server extension.
+-->
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  .ssb-root {
+    --paper: #F1F4EC;
+    --surface: #FFFFFF;
+    --ink: #1B2420;
+    --ink-soft: #5B6659;
+    --line: #DADFCB;
+    --accent: #E2A233;
+    --accent-text: #8A5A14;
+    --accent-soft: #FBF1DC;
+    --danger: #B23A22;
+    --danger-soft: #F7E4DE;
+    height: 100vh;
+    height: 100dvh;
+    width: 100%;
+    font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  .ssb-root.dark {
+    --paper: #11160F;
+    --surface: #1A2119;
+    --ink: #ECEFE3;
+    --ink-soft: #9CA592;
+    --line: #2B3428;
+    --accent: #E2A233;
+    --accent-text: #F0B44E;
+    --accent-soft: #23271A;
+    --danger: #E06246;
+    --danger-soft: #3A241D;
+  }
+  .ssb-root * { box-sizing: border-box; }
+  .ssb-display { font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; }
+  .ssb-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .ssb-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+  .ssb-flash { animation: ssb-flash-anim 1s ease; }
+  @keyframes ssb-flash-anim { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+  .ssb-msg-enter { animation: ssb-slide-in .25s ease; }
+  @keyframes ssb-slide-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .ssb-spin { animation: ssb-spin-anim 1s linear infinite; }
+  @keyframes ssb-spin-anim { to { transform: rotate(360deg); } }
+  .ssb-input { transition: border-color .15s ease; }
+  .ssb-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent) !important; }
+  .ssb-btn:focus-visible, .ssb-icon-btn:focus-visible, a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    .ssb-flash, .ssb-msg-enter, .ssb-spin { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="modal-root"></div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js';
+import {
+  getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
+  onAuthStateChanged, updateProfile as updateAuthProfile, updatePassword,
+  reauthenticateWithCredential, EmailAuthProvider, deleteUser, sendPasswordResetEmail,
+} from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
+import {
+  getDatabase, ref, push, set, update, remove, onValue, get, query,
+  orderByChild, limitToLast, endBefore, runTransaction, onDisconnect,
+} from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js';
+
+/* ----------------------------------------------------------------------
+   Firebase
+---------------------------------------------------------------------- */
+
+const firebaseConfig = {
+  apiKey: 'AIzaSyATnsEwhBRM1h8-CqqZla9Oz6nsbTsYGqQ',
+  authDomain: 'shaved-d13bf.firebaseapp.com',
+  databaseURL: 'https://shaved-d13bf-default-rtdb.firebaseio.com',
+  projectId: 'shaved-d13bf',
+  storageBucket: 'shaved-d13bf.firebasestorage.app',
+  messagingSenderId: '889087057378',
+  appId: '1:889087057378:web:2b13c7dd7fda35d77e2dbb',
+};
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+const db = getDatabase(fbApp);
+
+/* ----------------------------------------------------------------------
+   Constants
+---------------------------------------------------------------------- */
+
+const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉'];
+const AVATAR_COLORS = ['#E2A233', '#2C8C7A', '#C1442C', '#3F7A4E', '#3E6C8C', '#8C6A3E', '#5B6B4F', '#2E3B45'];
+const AVATAR_EMOJIS = ['🙂', '😎', '🦊', '🐢', '🌵', '🍉', '⚡', '🎧', '🛸', '🔥', '🌙', '🎱', '🐨', '🌈'];
+const NAV_ITEMS = [
+  { key: 'chat', label: 'Chat', icon: 'chat' },
+  { key: 'profile', label: 'Profile', icon: 'user' },
+  { key: 'settings', label: 'Settings', icon: 'settings' },
+];
+const PAGE_SIZE = 30;
+
+/* ----------------------------------------------------------------------
+   Icons (hand-drawn minimal line icons, no external icon library)
+---------------------------------------------------------------------- */
+
+const ICONS = {
+  chat: '<circle cx="12" cy="12" r="9"/><circle cx="8" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="12" r="1" fill="currentColor" stroke="none"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="7" y2="7"/><line x1="17" y1="17" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="7" y2="17"/><line x1="17" y1="7" x2="19.1" y2="4.9"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+  smile: '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9" y2="9"/><line x1="15" y1="9" x2="15" y2="9"/>',
+  reply: '<polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>',
+  x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/><line x1="2" y1="2" x2="22" y2="22"/>',
+  moon: '<path d="M21 12.5A9 9 0 1 1 11.5 3 7 7 0 0 0 21 12.5z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4" y1="12" x2="2" y2="12"/><line x1="22" y1="12" x2="20" y2="12"/><line x1="5" y1="5" x2="6.5" y2="6.5"/><line x1="17.5" y1="17.5" x2="19" y2="19"/><line x1="5" y1="19" x2="6.5" y2="17.5"/><line x1="17.5" y1="6.5" x2="19" y2="5"/>',
+  pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
+  spinner: '<circle cx="12" cy="12" r="9" stroke-dasharray="42 14"/>',
+  chevronUp: '<polyline points="18 15 12 9 6 15"/>',
+};
+
+function icon(name, size = 16) {
+  const spin = name === 'spinner' ? ' ssb-spin' : '';
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="flex-shrink-0${spin}" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+}
+
+/* ----------------------------------------------------------------------
+   Utilities
+---------------------------------------------------------------------- */
+
+function escapeHtml(str) {
+  return String(str == null ? '' : str).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function linkifyHtml(text) {
+  const re = /((https?:\/\/|www\.)[^\s<]+)/gi;
+  let out = '';
+  let lastIndex = 0;
+  let match;
+  while ((match = re.exec(text))) {
+    if (match.index > lastIndex) out += escapeHtml(text.slice(lastIndex, match.index));
+    const url = match[0];
+    const href = url.startsWith('http') ? url : `https://${url}`;
+    out += `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" data-action="noop" class="underline break-all" style="color:var(--accent-text)">${escapeHtml(url)}</a>`;
+    lastIndex = match.index + url.length;
+  }
+  if (lastIndex < text.length) out += escapeHtml(text.slice(lastIndex));
+  return out;
+}
+
+function formatTime(ts) {
+  return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+function formatDateLabel(ts) {
+  const d = new Date(ts);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a, b) => a.toDateString() === b.toDateString();
+  if (sameDay(d, today)) return 'Today';
+  if (sameDay(d, yesterday)) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function groupByDate(messages) {
+  const groups = [];
+  let current = null;
+  messages.forEach((m) => {
+    const label = formatDateLabel(m.createdAt);
+    if (!current || current.label !== label) {
+      current = { label, items: [] };
+      groups.push(current);
+    }
+    current.items.push(m);
+  });
+  return groups;
+}
+
+function friendlyAuthError(err) {
+  const code = (err && err.code) || '';
+  if (code.includes('email-already-in-use')) return 'An account already exists for that email. Log in instead.';
+  if (code.includes('invalid-email')) return 'Enter a valid email.';
+  if (code.includes('weak-password')) return 'Password needs at least 6 characters.';
+  if (code.includes('user-not-found') || code.includes('wrong-password') || code.includes('invalid-credential')) {
+    return "That email or password doesn't match an account.";
+  }
+  if (code.includes('too-many-requests')) return 'Too many attempts. Try again in a moment.';
+  if (code.includes('network-request-failed')) return "Couldn't reach the server. Check your connection.";
+  if (code.includes('requires-recent-login')) return 'Log out and back in, then try that again.';
+  return 'Something went wrong. Try again.';
+}
+
+function playPing() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.value = 720;
+    g.gain.value = 0.0001;
+    o.connect(g);
+    g.connect(ctx.destination);
+    const now = ctx.currentTime;
+    g.gain.exponentialRampToValueAtTime(0.06, now + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+    o.start(now);
+    o.stop(now + 0.3);
+    o.onended = () => ctx.close();
+  } catch {
+    /* ignore */
+  }
+}
+
+function avatarHtml(username, color, emoji, size = 36) {
+  const initials = username ? escapeHtml(username.slice(0, 2).toUpperCase()) : '?';
+  const bg = color || '#5B6B4F';
+  const inner = emoji
+    ? `<span style="font-size:${size * 0.5}px;line-height:1">${escapeHtml(emoji)}</span>`
+    : `<span class="font-semibold" style="color:#fff;font-size:${size * 0.36}px">${initials}</span>`;
+  return `<div class="flex items-center justify-center rounded-full flex-shrink-0 select-none" style="width:${size}px;height:${size}px;background:${bg}" aria-hidden="true">${inner}</div>`;
+}
+
+/* ----------------------------------------------------------------------
+   State
+---------------------------------------------------------------------- */
+
+const state = {
+  view: 'loading', // loading | auth | chat | profile | settings
+  authMode: 'login',
+  authError: '',
+  authNotice: '',
+  authLoading: false,
+  authDraft: {},
+
+  uid: null,
+  authEmail: null,
+  usersById: {},
+  messages: [], // ascending by createdAt
+  typingMap: {}, // { uid: { username, ts } }
+  oldestLoaded: null,
+  hasMore: true,
+  loadingMore: false,
+
+  menuOpen: false,
+  replyingTo: null,
+  draftText: '',
+  sending: false,
+  reactionPickerId: null,
+  readPopoverId: null,
+
+  profileEditing: false,
+  profileEditDraft: null,
+
+  legalModalKind: null,
+};
+
+let awaitingFirstProfile = false;
+let hasLoadedMessagesOnce = false;
+let lastMsgId = null;
+let hasRenderedMessageListOnce = false;
+let typingClearTimer = null;
+let lastTypingWrite = 0;
+const pendingReadIds = new Set();
+let flushReadsTimer = null;
+let msgObserver = null;
+let usersUnsub = null;
+let messagesUnsub = null;
+let typingUnsub = null;
+
+function getProfile() {
+  if (!state.uid || !state.usersById[state.uid]) return null;
+  return { uid: state.uid, email: state.authEmail, ...state.usersById[state.uid] };
+}
+
+const root = document.getElementById('root');
+const modalRoot = document.getElementById('modal-root');
+
+function rootClass() {
+  const p = getProfile();
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const dark = p ? p.theme === 'dark' : prefersDark;
+  return `ssb-root flex flex-col${dark ? ' dark' : ''}`;
+}
+
+function refreshRootDarkClass() {
+  const p = getProfile();
+  const rootDiv = root.firstElementChild;
+  if (!rootDiv) return;
+  rootDiv.classList.toggle('dark', !!(p && p.theme === 'dark'));
+}
+
+/* ----------------------------------------------------------------------
+   Top bar / nav
+---------------------------------------------------------------------- */
+
+function topBarHtml() {
+  const p = getProfile();
+  const title = state.view === 'chat' ? '7 shaved balls' : state.view === 'profile' ? 'Profile' : 'Settings';
+  return `
+    <header class="flex items-center justify-between px-4 py-3 border-b flex-shrink-0" style="border-color:var(--line);background:var(--paper)">
+      <span class="ssb-display font-semibold" style="font-size:1.05rem">${escapeHtml(title)}</span>
+      <div class="relative">
+        <button type="button" data-action="toggle-account-menu" class="ssb-icon-btn rounded-full" aria-label="Account menu">
+          ${avatarHtml(p.username, p.avatarColor, p.avatarEmoji, 34)}
+        </button>
+        <div id="account-menu-dropdown">${accountMenuDropdownHtml()}</div>
+      </div>
+    </header>
+  `;
+}
+
+function accountMenuDropdownHtml() {
+  if (!state.menuOpen) return '';
+  return `
+    <div class="fixed inset-0 z-10" data-action="toggle-account-menu"></div>
+    <div class="absolute right-0 mt-2 w-48 rounded-lg z-20 py-1 border" style="background:var(--surface);border-color:var(--line)">
+      <button type="button" data-action="nav" data-view="profile" class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left" style="color:var(--ink)">${icon('user', 16)}Profile</button>
+      <button type="button" data-action="nav" data-view="settings" class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left" style="color:var(--ink)">${icon('settings', 16)}Settings</button>
+      <div class="my-1 border-t" style="border-color:var(--line)"></div>
+      <button type="button" data-action="logout" class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left" style="color:var(--danger)">${icon('logout', 16)}Log out</button>
+    </div>
+  `;
+}
+
+function toggleAccountMenu() {
+  state.menuOpen = !state.menuOpen;
+  const dropdown = document.getElementById('account-menu-dropdown');
+  if (dropdown) dropdown.innerHTML = accountMenuDropdownHtml();
+}
+
+function refreshTopBarAvatar() {
+  const p = getProfile();
+  if (!p) return;
+  const btn = document.querySelector('header button[data-action="toggle-account-menu"]');
+  if (btn) btn.innerHTML = avatarHtml(p.username, p.avatarColor, p.avatarEmoji, 34);
+}
+
+function sideNavHtml(view) {
+  return `
+    <nav class="hidden md:flex flex-col w-56 border-r flex-shrink-0 py-4 px-3 gap-1" style="border-color:var(--line)">
+      ${NAV_ITEMS.map((item) => {
+        const active = view === item.key;
+        const c = active ? 'var(--accent-text)' : 'var(--ink-soft)';
+        const bg = active ? 'var(--accent-soft)' : 'transparent';
+        return `<button type="button" data-action="nav" data-view="${item.key}" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium" style="background:${bg};color:${c}">${icon(item.icon, 18)}${item.label}</button>`;
+      }).join('')}
+    </nav>
+  `;
+}
+
+function bottomNavHtml(view) {
+  return `
+    <nav class="flex md:hidden border-t flex-shrink-0" style="border-color:var(--line);background:var(--paper)">
+      ${NAV_ITEMS.map((item) => {
+        const active = view === item.key;
+        const c = active ? 'var(--accent-text)' : 'var(--ink-soft)';
+        return `<button type="button" data-action="nav" data-view="${item.key}" class="flex-1 flex flex-col items-center gap-1 py-2.5 text-xs font-medium" style="color:${c}">${icon(item.icon, 20)}<span>${item.label}</span></button>`;
+      }).join('')}
+    </nav>
+  `;
+}
+
+/* ----------------------------------------------------------------------
+   Auth screen
+---------------------------------------------------------------------- */
+
+function captureAuthDraft() {
+  const d = state.authDraft || {};
+  const emailEl = document.getElementById('auth-email');
+  const pwEl = document.getElementById('auth-password');
+  const userEl = document.getElementById('auth-username');
+  const confirmEl = document.getElementById('auth-confirm');
+  if (emailEl) d.email = emailEl.value;
+  if (pwEl) d.password = pwEl.value;
+  if (userEl) d.username = userEl.value;
+  if (confirmEl) d.confirm = confirmEl.value;
+  state.authDraft = d;
+}
+
+function authFormFieldsHtml(mode, draft) {
+  const showPw = !!draft.showPw;
+  return `
+    <form id="auth-form" class="flex flex-col gap-4" data-mode="${mode}">
+      ${mode === 'signup' ? `
+        <label class="flex flex-col gap-1.5 text-sm">
+          <span style="color:var(--ink-soft)">Username</span>
+          <input id="auth-username" type="text" value="${escapeHtml(draft.username || '')}" placeholder="what people will call you" autocomplete="username" required minlength="3" maxlength="20" class="w-full px-3 py-2 rounded-lg text-sm ssb-input" style="background:var(--surface);border:1.5px solid var(--line);color:var(--ink)" />
+        </label>
+      ` : ''}
+      <label class="flex flex-col gap-1.5 text-sm">
+        <span style="color:var(--ink-soft)">Email</span>
+        <input id="auth-email" type="email" value="${escapeHtml(draft.email || '')}" placeholder="you@example.com" autocomplete="email" required class="w-full px-3 py-2 rounded-lg text-sm ssb-input" style="background:var(--surface);border:1.5px solid var(--line);color:var(--ink)" />
+      </label>
+      <label class="flex flex-col gap-1.5 text-sm">
+        <span style="color:var(--ink-soft)">Password</span>
+        <div class="relative">
+          <input id="auth-password" type="${showPw ? 'text' : 'password'}" value="${escapeHtml(draft.password || '')}" placeholder="at least 6 characters" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}" required minlength="6" class="w-full px-3 py-2 rounded-lg text-sm ssb-input" style="background:var(--surface);border:1.5px solid var(--line);color:var(--ink);padding-right:2.25rem" />
+          <button type="button" data-action="toggle-password-visibility" class="ssb-icon-btn absolute right-2 top-1/2 -translate-y-1/2" style="color:var(--ink-soft)" aria-label="${showPw ? 'Hide password' : 'Show password'}">${icon(showPw ? 'eyeOff' : 'eye', 16)}</button>
+        </div>
+      </label>
+      ${mode === 'signup' ? `
+        <label class="flex flex-col gap-1.5 text-sm">
+          <span style="color:var(--ink-soft)">Confirm password</span>
+          <input id="auth-confirm" type="${showPw ? 'text' : 'password'}" value="${escapeHtml(draft.confirm || '')}" placeholder="type it again" autocomplete="new-password" required minlength="6" class="w-full px-3 py-2 rounded-lg text-sm ssb-input" style="background:var(--surface);border:1.5px solid var(--line);color:var(--ink)" />
+        </label>
+      ` : ''}
+      <div id="auth-error" class="text-sm" style="color:var(--danger)">${state.authError ? escapeHtml(state.authError) : ''}</div>
+      <div id="auth-notice" class="text-sm" style="color:var(--accent-text)">${state.authNotice ? escapeHtml(state.authNotice) : ''}</div>
+      <button id="auth-submit" type="submit" class="ssb-btn inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium px-4 py-2" style="background:var(--accent);color:var(--ink)" ${state.authLoading ? 'disabled' : ''}>
+        ${state.authLoading ? icon('spinner', 16) : (mode === 'login' ? 'Log in' : 'Create account')}
+      </button>
+    </form>
+    ${mode === 'login' ? `<button type="button" data-action="reset-password" class="mt-3 text-xs underline" style="color:var(--ink-soft)">Forgot password?</button>` : ''}
+    ${mode === 'login' ? `
+      <p class="mt-6 text-sm" style="color:var(--ink-soft)">New here? <button type="button" data-action="switch-auth-mode" data-mode="signup" class="underline" style="color:var(--accent-text)">Create new profile</button></p>
+    ` : `
+      <p class="mt-6 text-sm" style="color:var(--ink-soft)">Already have an account? <button type="button" data-action="switch-auth-mode" data-mode="login" class="underline" style="color:var(--accent-text)">Log in</button></p>
+    `}
+    <div class="flex gap-4 mt-8">
+      <button type="button" data-action="show-legal" data-kind="privacy" class="text-xs underline" style="color:var(--ink-soft)">Privacy policy</button>
+      <button type="button" data-action="show-legal" data-kind="terms" class="text-xs underline" style="color:var(--ink-soft)">Terms of service</button>
+    </div>
+  `;
+}
+
+function authScreenHtml() {
+  return `
+    <div class="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto ssb-scroll">
+      <div class="md:w-5/12 flex flex-col justify-center px-6 py-10 md:px-14 border-b md:border-b-0 md:border-r flex-shrink-0" style="border-color:var(--line)">
+        <h1 class="ssb-display" style="font-size:2.1rem;font-weight:700;letter-spacing:-0.02em;line-height:1.1">7 shaved balls</h1>
+        <p class="mt-3 max-w-sm text-sm" style="color:var(--ink-soft)">A running chat for your people. Reply, react, and see who's actually reading.</p>
+      </div>
+      <div class="flex-1 flex items-center justify-center px-6 py-10">
+        <div class="w-full max-w-sm">
+          <div class="flex mb-6 rounded-lg overflow-hidden border" style="border-color:var(--line)">
+            <button type="button" data-action="switch-auth-mode" data-mode="login" class="flex-1 py-2 text-sm font-medium ssb-btn" style="background:${state.authMode === 'login' ? 'var(--accent)' : 'transparent'};color:${state.authMode === 'login' ? 'var(--ink)' : 'var(--ink-soft)'}">Log in</button>
+            <button type="button" data-action="switch-auth-mode" data-mode="signup" class="flex-1 py-2 text-sm font-medium ssb-btn" style="background:${state.authMode === 'signup' ? 'var(--accent)' : 'transparent'};color:${state.authMode === 'signup' ? 'var(--ink)' : 'var(--ink-soft)'}">Create account</button>
+          </div>
+          <div id="auth-form-region">${authFormFieldsHtml(state.authMode, state.authDraft)}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function mountAuth() {
+  root.innerHTML = `<div class="${rootClass()}">${authScreenHtml()}</div>`;
+}
+
+function updateAuthFeedback() {
+  const errEl = document.getElementById('auth-error');
+  const noticeEl = document.getElementById('auth-notice');
+  const submitBtn = document.getElementById('auth-submit');
+  if (errEl) errEl.textContent = state.authError || '';
+  if (noticeEl) noticeEl.textContent = state.authNotice || '';
+  if (submitBtn) {
+    submitBtn.disabled = state.authLoading;
+    submitBtn.innerHTML = state.authLoading ? icon('spinner', 16) : (state.authMode === 'login' ? 'Log in' : 'Create account');
+  }
+}
+
+function switchAuthMode(mode) {
+  captureAuthDraft();
+  state.authMode = mode;
+  state.authError = '';
+  state.authNotice = '';
+  mountAuth();
+}
+
+function togglePasswordVisibility() {
+  captureAuthDraft();
+  state.authDraft.showPw = !state.authDraft.showPw;
+  mountAuth();
+}
+
+async function handleAuthSubmit(form) {
+  const mode = form.dataset.mode;
+  captureAuthDraft();
+  const d = state.authDraft;
+  if (mode === 'login') await handleLogin((d.email || '').trim(), d.password || '');
+  else await handleSignup((d.username || '').trim(), (d.email || '').trim(), d.password || '', d.confirm || '');
+}
+
+async function handleLogin(email, password) {
+  state.authError = '';
+  state.authNotice = '';
+  if (!email || !password) { state.authError = 'Enter your email and password.'; updateAuthFeedback(); return; }
+  state.authLoading = true;
+  updateAuthFeedback();
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+  } catch (err) {
+    state.authError = friendlyAuthError(err);
+  } finally {
+    state.authLoading = false;
+    updateAuthFeedback();
+  }
+}
+
+async function handleResetPassword() {
+  captureAuthDraft();
+  const email = (state.authDraft.email || '').trim();
+  state.authError = '';
+  state.authNotice = '';
+  if (!email) { state.authError = 'Enter your email above first, then tap this again.'; updateAuthFeedback(); return; }
+  try {
+    await sendPasswordResetEmail(auth, email);
+    state.authNotice = 'Check your email for a reset link.';
+  } catch (err) {
+    state.authError = friendlyAuthError(err);
+  }
+  updateAuthFeedback();
+}
+
+async function handleSignup(username, email, password, confirm) {
+  state.authError = '';
+  state.authNotice = '';
+  if (!username || username.length < 3) { state.authError = 'Username needs at least 3 characters.'; updateAuthFeedback(); return; }
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) { state.authError = 'Username can only use letters, numbers and underscores.'; updateAuthFeedback(); return; }
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) { state.authError = 'Enter a valid email.'; updateAuthFeedback(); return; }
+  if (password.length < 6) { state.authError = 'Password needs at least 6 characters.'; updateAuthFeedback(); return; }
+  if (password !== confirm) { state.authError = "Passwords don't match."; updateAuthFeedback(); return; }
+
+  const usernameLower = username.toLowerCase();
+  state.authLoading = true;
+  updateAuthFeedback();
+  let createdUser = null;
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    createdUser = cred.user;
+    const usernameRef = ref(db, `usernames/${usernameLower}`);
+    const txResult = await runTransaction(usernameRef, (current) => {
+      if (current === null) return createdUser.uid;
+      return; // abort: already taken
+    });
+    if (!txResult.committed) {
+      await deleteUser(createdUser);
+      state.authError = 'That username is already taken.';
+      return;
+    }
+    await set(ref(db, `users/${createdUser.uid}`), {
+      username,
+      bio: '',
+      avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
+      avatarEmoji: '',
+      theme: 'light',
+      soundEnabled: true,
+      createdAt: Date.now(),
+    });
+    await updateAuthProfile(createdUser, { displayName: username });
+  } catch (err) {
+    if (createdUser) {
+      try { await deleteUser(createdUser); } catch { /* ignore */ }
+    }
+    state.authError = friendlyAuthError(err);
+  } finally {
+    state.authLoading = false;
+    updateAuthFeedback();
+  }
+}
+
+async function handleLogout() {
+  const myUid = state.uid;
+  if (typingClearTimer) clearTimeout(typingClearTimer);
+  if (myUid) {
+    try { await remove(ref(db, `typing/${myUid}`)); } catch { /* ignore */ }
+  }
+  state.authMode = 'login';
+  state.authError = '';
+  state.authNotice = '';
+  state.authDraft = {};
+  await signOut(auth);
+}
+
+/* ----------------------------------------------------------------------
+   Chat
+---------------------------------------------------------------------- */
+
+function dateSeparatorHtml(label) {
+  return `
+    <div class="flex items-center gap-3 px-4 md:px-6 py-2">
+      <div class="flex-1 h-px" style="background:var(--line)"></div>
+      <span class="text-xs" style="color:var(--ink-soft)">${escapeHtml(label)}</span>
+      <div class="flex-1 h-px" style="background:var(--line)"></div>
+    </div>
+  `;
+}
+
+function messageRowHtml(msg, byId) {
+  const uid = state.uid;
+  const author = state.usersById[msg.uid];
+  const displayName = (author && author.username) || msg.username || 'someone';
+  const isOwn = msg.uid === uid;
+  const readByIds = Object.keys(msg.readBy || {});
+  const replyToMsg = msg.replyToId ? byId[msg.replyToId] : null;
+  const replyAuthor = replyToMsg ? state.usersById[replyToMsg.uid] : null;
+
+  const replyBlock = replyToMsg ? `
+    <button type="button" data-action="scroll-to-message" data-id="${escapeHtml(replyToMsg.id)}" class="mt-1 mb-1 flex items-start gap-1.5 text-left rounded-md px-2 py-1 text-xs max-w-full" style="background:var(--surface);border:1px solid var(--line);color:var(--ink-soft)">
+      ${icon('reply', 12)}
+      <span class="truncate"><strong style="color:var(--ink)">${escapeHtml((replyAuthor && replyAuthor.username) || replyToMsg.username || 'someone')}</strong>${'  '}${escapeHtml(replyToMsg.text)}</span>
+    </button>
+  ` : '';
+
+  const reactionsEntries = Object.entries(msg.reactions || {}).filter(([, uids]) => uids && Object.keys(uids).length);
+  const reactionsBlock = reactionsEntries.length ? `
+    <div class="flex flex-wrap gap-1.5 mt-1.5">
+      ${reactionsEntries.map(([emoji, uids]) => {
+        const count = Object.keys(uids).length;
+        const mine = !!uids[uid];
+        return `<button type="button" data-action="react" data-msg-id="${escapeHtml(msg.id)}" data-emoji="${escapeHtml(emoji)}" class="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs" style="border:1px solid var(--line);background:${mine ? 'var(--accent-soft)' : 'var(--surface)'}"><span>${emoji}</span><span style="color:var(--ink-soft)">${count}</span></button>`;
+      }).join('')}
+    </div>
+  ` : '';
+
+  const reactionPickerBlock = state.reactionPickerId === msg.id ? `
+    <div class="fixed inset-0 z-10" data-action="toggle-reaction-picker" data-id="${escapeHtml(msg.id)}"></div>
+    <div class="absolute left-0 bottom-full mb-1 flex gap-1 rounded-full px-2 py-1.5 z-20" style="background:var(--surface);border:1px solid var(--line)">
+      ${REACTIONS.map((em) => `<button type="button" data-action="react" data-msg-id="${escapeHtml(msg.id)}" data-emoji="${escapeHtml(em)}" data-close-picker="1" class="text-base hover:scale-110 transition-transform" style="line-height:1">${em}</button>`).join('')}
+    </div>
+  ` : '';
+
+  const readPopoverBlock = (state.readPopoverId === msg.id && isOwn) ? `
+    <div class="mt-1.5 text-xs rounded-md px-2.5 py-2" style="background:var(--surface);border:1px solid var(--line);color:var(--ink-soft)" data-action="noop">
+      ${readByIds.length ? `Seen by ${escapeHtml(readByIds.map((id) => (state.usersById[id] && state.usersById[id].username) || 'someone').join(', '))}` : 'No one has seen this yet.'}
+    </div>
+  ` : '';
+
+  return `
+    <div data-msg-id="${escapeHtml(msg.id)}" data-action="${isOwn ? 'toggle-read-popover' : 'noop'}" data-id="${escapeHtml(msg.id)}" class="ssb-msg-enter group px-4 py-2.5 md:px-6 flex gap-3" style="background:${isOwn ? 'var(--accent-soft)' : 'transparent'};cursor:${isOwn ? 'pointer' : 'default'}">
+      ${avatarHtml(displayName, author && author.avatarColor, author && author.avatarEmoji, 34)}
+      <div class="flex-1 min-w-0">
+        <div class="flex items-baseline gap-2">
+          <span class="text-sm font-semibold">${escapeHtml(displayName)}</span>
+          <span class="text-xs" style="color:var(--ink-soft)">${formatTime(msg.createdAt)}</span>
+        </div>
+        ${replyBlock}
+        <p class="text-sm mt-0.5 whitespace-pre-wrap break-words">${linkifyHtml(msg.text || '')}</p>
+        ${reactionsBlock}
+        <div class="flex items-center gap-4 mt-1.5">
+          <button type="button" data-action="reply" data-id="${escapeHtml(msg.id)}" class="flex items-center gap-1 text-xs" style="color:var(--ink-soft)">${icon('reply', 13)} Reply</button>
+          <div class="relative">
+            <button type="button" data-action="toggle-reaction-picker" data-id="${escapeHtml(msg.id)}" class="flex items-center gap-1 text-xs" style="color:var(--ink-soft)">${icon('smile', 13)} React</button>
+            ${reactionPickerBlock}
+          </div>
+          ${isOwn ? `<span class="flex items-center gap-1 text-xs" style="color:var(--ink-soft)">${icon('eye', 13)} ${readByIds.length ? `Seen by ${readByIds.length}` : 'Sent'}</span>` : ''}
+        </div>
+        ${readPopoverBlock}
+      </div>
+    </div>
+  `;
+}
+
+function mountChat() {
+  const p = getProfile();
+  if (!p) { mountAuth(); return; }
+  hasRenderedMessageListOnce = false;
+  root.innerHTML = `
+    <div class="${rootClass()}">
+      ${topBarHtml()}
+      <div class="flex flex-1 min-h-0">
+        ${sideNavHtml('chat')}
+        <main class="flex-1 flex flex-col min-h-0">
+          <div class="flex-1 flex flex-col min-h-0">
+            <div id="message-feed" class="flex-1 overflow-y-auto overscroll-contain ssb-scroll py-2">
+              <div class="max-w-2xl mx-auto w-full">
+                <div id="load-older-row"></div>
+                <div id="message-list-inner"></div>
+                <div id="feed-bottom"></div>
+              </div>
+            </div>
+            <div class="px-4 md:px-6 pt-1 h-5 flex-shrink-0">
+              <p id="typing-label" class="text-xs italic truncate max-w-2xl mx-auto" style="color:var(--ink-soft)"></p>
+            </div>
+            <div class="border-t px-4 md:px-6 py-3 flex-shrink-0" style="border-color:var(--line)">
+              <div class="max-w-2xl mx-auto w-full">
+                <div id="reply-preview"></div>
+                <form id="composer-form" class="flex items-end gap-2">
+                  <textarea id="composer-textarea" placeholder="Write something…" rows="1" maxlength="1000" class="flex-1 resize-none px-3 py-2 rounded-lg text-sm ssb-input" style="background:var(--surface);border:1.5px solid var(--line);color:var(--ink);max-height:120px">${escapeHtml(state.draftText || '')}</textarea>
+                  <button id="composer-send" type="submit" class="ssb-btn inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium px-4 py-2" style="background:var(--accent);color:var(--ink)" ${!((state.draftText || '').trim()) ? 'disabled' : ''} aria-label="Send message">${icon('send', 16)}</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+      ${bottomNavHtml('chat')}
+    </div>
+  `;
+  updateReplyPreview();
+  renderMessageList();
+  updateTypingIndicatorLabel();
+}
+
+function renderMessageList() {
+  const listEl = document.getElementById('message-list-inner');
+  const olderRowEl = document.getElementById('load-older-row');
+  const feedEl = document.getElementById('message-feed');
+  if (!listEl || !feedEl || !olderRowEl) return;
+
+  const nearBottomBefore = feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 150;
+  const isFirstRender = !hasRenderedMessageListOnce;
+
+  olderRowEl.innerHTML = (state.hasMore && state.messages.length > 0) ? `
+    <div class="flex justify-center py-2">
+      <button type="button" data-action="load-older" class="ssb-btn inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium px-4 py-2" style="background:transparent;color:var(--ink);border:1.5px solid var(--line)" ${state.loadingMore ? 'disabled' : ''}>
+        ${state.loadingMore ? icon('spinner', 14) : icon('chevronUp', 14)} Load older messages
+      </button>
+    </div>
+  ` : '';
+
+  if (state.messages.length === 0) {
+    listEl.innerHTML = `
+      <div class="flex flex-col items-center justify-center text-center px-6" style="min-height:60vh">
+        <p class="ssb-display font-semibold" style="font-size:1.15rem">No messages yet</p>
+        <p class="text-sm mt-1" style="color:var(--ink-soft)">Say hello. The chat is empty until someone starts it.</p>
+      </div>
+    `;
+  } else {
+    const byId = {};
+    state.messages.forEach((m) => { byId[m.id] = m; });
+    const groups = groupByDate(state.messages);
+    listEl.innerHTML = groups.map((group) => `
+      <div>
+        ${dateSeparatorHtml(group.label)}
+        ${group.items.map((m) => messageRowHtml(m, byId)).join('')}
+      </div>
+    `).join('');
+  }
+
+  if (msgObserver) msgObserver.disconnect();
+  msgObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        const id = entry.target.getAttribute('data-msg-id');
+        if (id) queueRead(id);
+      }
+    });
+  }, { root: feedEl, threshold: 0.6 });
+  listEl.querySelectorAll('[data-msg-id]').forEach((n) => msgObserver.observe(n));
+
+  if (nearBottomBefore || isFirstRender) {
+    requestAnimationFrame(() => {
+      const bottomEl = document.getElementById('feed-bottom');
+      if (bottomEl) bottomEl.scrollIntoView({ behavior: isFirstRender ? 'auto' : 'smooth' });
+    });
+  }
+  hasRenderedMessageListOnce = true;
+}
+
+function updateTypingIndicatorLabel() {
+  const el = document.getElementById('typing-label');
+  if (!el) return;
+  const uid = state.uid;
+  const now = Date.now();
+  const names = Object.entries(state.typingMap)
+    .filter(([u, t]) => u !== uid && t && now - t.ts < 4000)
+    .map(([, t]) => t.username);
+  let label = '';
+  if (names.length === 1) label = `${names[0]} is typing…`;
+  else if (names.length === 2) label = `${names[0]} and ${names[1]} are typing…`;
+  else if (names.length > 2) label = `${names[0]}, ${names[1]} and ${names.length - 2} more are typing…`;
+  el.textContent = label;
+}
+
+function updateReplyPreview() {
+  const el = document.getElementById('reply-preview');
+  if (!el) return;
+  if (!state.replyingTo) { el.innerHTML = ''; return; }
+  const r = state.replyingTo;
+  el.innerHTML = `
+    <div class="flex items-center justify-between gap-2 mb-2 rounded-md px-2.5 py-1.5 text-xs" style="background:var(--surface);border:1px solid var(--line)">
+      <span class="truncate" style="color:var(--ink-soft)">Replying to <strong style="color:var(--ink)">${escapeHtml(r.username)}</strong>: ${escapeHtml(r.text)}</span>
+      <button type="button" data-action="cancel-reply" class="ssb-icon-btn flex-shrink-0" aria-label="Cancel reply">${icon('x', 14)}</button>
+    </div>
+  `;
+}
+
+async function handleTypingActivity() {
+  const myUid = state.uid;
+  const me = getProfile();
+  if (!myUid || !me) return;
+  const now = Date.now();
+  if (now - lastTypingWrite > 1200) {
+    lastTypingWrite = now;
+    const typingRef = ref(db, `typing/${myUid}`);
+    try {
+      await set(typingRef, { username: me.username, ts: now });
+      onDisconnect(typingRef).remove();
+    } catch { /* ignore */ }
+  }
+  if (typingClearTimer) clearTimeout(typingClearTimer);
+  typingClearTimer = setTimeout(async () => {
+    try { await remove(ref(db, `typing/${myUid}`)); } catch { /* ignore */ }
+  }, 3000);
+}
+
+async function handleSend() {
+  const textarea = document.getElementById('composer-textarea');
+  if (!textarea) return;
+  const text = textarea.value.trim();
+  const myUid = state.uid;
+  const me = getProfile();
+  if (!text || !myUid || !me) return;
+  state.sending = true;
+  const sendBtn = document.getElementById('composer-send');
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = icon('spinner', 16); }
+  try {
+    const newRef = push(ref(db, 'messages'));
+    await set(newRef, {
+      uid: myUid,
+      username: me.username,
+      text,
+      createdAt: Date.now(),
+      replyToId: state.replyingTo ? state.replyingTo.id : null,
+      reactions: {},
+      readBy: {},
+    });
+    textarea.value = '';
+    state.draftText = '';
+    state.replyingTo = null;
+    updateReplyPreview();
+    if (typingClearTimer) clearTimeout(typingClearTimer);
+    await remove(ref(db, `typing/${myUid}`));
+  } finally {
+    state.sending = false;
+    if (sendBtn) {
+      sendBtn.innerHTML = icon('send', 16);
+      const t = document.getElementById('composer-textarea');
+      sendBtn.disabled = !(t && t.value.trim());
+    }
+  }
+}
+
+async function handleToggleReaction(msgId, emoji) {
+  if (!state.uid) return;
+  const msg = state.messages.find((m) => m.id === msgId);
+  const already = !!(msg && msg.reactions && msg.reactions[emoji] && msg.reactions[emoji][state.uid]);
+  const reactionRef = ref(db, `messages/${msgId}/reactions/${emoji}/${state.uid}`);
+  try {
+    if (already) await remove(reactionRef);
+    else await set(reactionRef, true);
+  } catch { /* ignore */ }
+}
+
+function scrollToMessage(id) {
+  const el = document.querySelector(`[data-msg-id="${CSS.escape(id)}"]`);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('ssb-flash');
+    setTimeout(() => el.classList.remove('ssb-flash'), 1000);
+  }
+}
+
+function queueRead(id) {
+  pendingReadIds.add(id);
+  if (flushReadsTimer) return;
+  flushReadsTimer = setTimeout(flushReads, 900);
+}
+
+async function flushReads() {
+  flushReadsTimer = null;
+  const ids = Array.from(pendingReadIds);
+  pendingReadIds.clear();
+  const myUid = state.uid;
+  if (!ids.length || !myUid) return;
+  const updates = {};
+  ids.forEach((id) => {
+    const m = state.messages.find((x) => x.id === id);
+    if (m && m.uid !== myUid && !(m.readBy && m.readBy[myUid])) {
+      updates[`messages/${id}/readBy/${myUid}`] = true;
+    }
+  });
+  if (Object.keys(updates).length) {
+    try { await update(ref(db), updates); } catch { /* ignore */ }
+  }
+}
+
+async function loadOlderMessages() {
+  if (!state.oldestLoaded || state.loadingMore || !state.hasMore) return;
+  state.loadingMore = true;
+  renderMessageList();
+  try {
+    const olderQuery = query(ref(db, 'messages'), orderByChild('createdAt'), endBefore(state.oldestLoaded), limitToLast(PAGE_SIZE));
+    const snap = await get(olderQuery);
+    const val = snap.val() || {};
+    const list = Object.entries(val).map(([id, m]) => ({ id, ...m }));
+    if (!list.length) {
+      state.hasMore = false;
+    } else {
+      const seen = new Set(state.messages.map((m) => m.id));
+      const merged = [...list.filter((m) => !seen.has(m.id)), ...state.messages];
+      state.messages = merged.sort((a, b) => a.createdAt - b.createdAt);
+      state.oldestLoaded = Math.min(...list.map((m) => m.createdAt));
+      if (list.length < PAGE_SIZE) state.hasMore = false;
+    }
+  } finally {
+    state.loadingMore = false;
+    renderMessageList();
+  }
+}
+
+/* ----------------------------------------------------------------------
+   Profile
+---------------------------------------------------------------------- */
+
+function statHtml(label, value) {
+  return `
+    <div class="rounded-lg py-3 text-center" style="border:1px solid var(--line)">
+      <p class="ssb-display font-semibold" style="font-size:1.2rem">${value}</p>
+      <p class="text-xs mt-0.5" style="color:var(--ink-soft)">${escapeHtml(label)}</p>
+    </div>
+  `;
+}
+
+function colorPickerHtml(selected) {
+  return AVATAR_COLORS.map((c) => `
+    <button type="button" data-action="pick-avatar-color" data-color="${c}" class="w-8 h-8 rounded-full flex-shrink-0" style="background:${c};box-shadow:${selected === c ? '0 0 0 2px var(--paper), 0 0 0 4px var(--ink)' : 'none'}" aria-label="Choose color ${c}"></button>
+  `).join('');
+}
+
+function emojiPickerHtml(selected) {
+  const blank = `<button type="button" data-action="pick-avatar-emoji" data-emoji="" class="w-9 h-9 rounded-full flex items-center justify-center text-xs" style="border:${!selected ? '2px solid var(--ink)' : '1px solid var(--line)'}">Aa</button>`;
+  const rest = AVATAR_EMOJIS.map((em) => `<button type="button" data-action="pick-avatar-emoji" data-emoji="${em}" class="w-9 h-9 rounded-full flex items-center justify-center text-lg" style="border:${selected === em ? '2px solid var(--ink)' : '1px solid var(--line)'}">${em}</button>`).join('');
+  return blank + rest;
+}
+
+function computeProfileStats(p) {
+  const myMessages = state.messages.filter((m) => m.uid === p.uid);
+  const reactionsReceived = myMessages.reduce(
+    (sum, m) => sum + Object.values(m.reactions || {}).reduce((a, uids) => a + Object.keys(uids || {}).length, 0),
+    0
+  );
+  const daysActive = Math.max(1, Math.ceil((Date.now() - p.createdAt) / 86400000));
+  return { count: myMessages.length, reactionsReceived, daysActive };
+}
+
+function mountProfile() {
+  const p = getProfile();
+  if (!p) { mountAuth(); return; }
+  state.profileEditing = false;
+  state.profileEditDraft = null;
+  root.innerHTML = `
+    <div class="${rootClass()}">
+      ${topBarHtml()}
+      <div class="flex flex-1 min-h-0">
+        ${sideNavHtml('profile')}
+        <main class="flex-1 flex flex-col min-h-0">
+          <div id="profile-content" class="flex-1 overflow-y-auto ssb-scroll px-6 py-8"></div>
+        </main>
+      </div>
+      ${bottomNavHtml('profile')}
+    </div>
+  `;
+  renderProfileContent();
+}
+
+function renderProfileContent() {
+  const p = getProfile();
+  const el = document.getElementById('profile-content');
+  if (!p || !el) return;
+  const stats = computeProfileStats(p);
+
+  if (!state.profileEditing) {
+    el.innerHTML = `
+      <div class="max-w-md mx-auto">
+        <div class="flex flex-col items-center text-center">
+          ${avatarHtml(p.username, p.avatarColor, p.avatarEmoji, 84)}
+          <h2 class="ssb-display font-semibold mt-3" style="font-size:1.3rem">${escapeHtml(p.username)}</h2>
+          <p class="text-sm mt-1" style="color:var(--ink-soft)">${escapeHtml(p.email)}</p>
+          <p class="text-sm mt-3 max-w-xs">${escapeHtml(p.bio || 'No bio yet.')}</p>
+        </div>
+        <div class="grid grid-cols-3 gap-2 mt-6">
+          ${statHtml('Messages', stats.count)}
+          ${statHtml('Reactions', stats.reactionsReceived)}
+          ${statHtml('Days here', stats.daysActive)}
+        </div>
+        <button type="button" data-action="edit-profile" class="ssb-btn w-full mt-6 inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium px-4 py-2" style="background:transparent;color:var(--ink);border:1.5px solid var(--line)">${icon('pencil', 14)} Edit profile</button>
+      </div>
+    `;
+  } else {
+    if (!state.profileEditDraft) {
+      state.profileEditDraft = { bio: p.bio || '', avatarColor: p.avatarColor, avatarEmoji: p.avatarEmoji };
+    }
+    const draft = state.profileEditDraft;
+    el.innerHTML = `
+      <div class="max-w-md mx-auto">
+        <div class="flex flex-col items-center text-center">
+          <div id="profile-avatar-preview">${avatarHtml(p.username, draft.avatarColor, draft.avatarEmoji, 84)}</div>
+          <h2 class="ssb-display font-semibold mt-3" style="font-size:1.3rem">${escapeHtml(p.username)}</h2>
+          <p class="text-sm mt-1" style="color:var(--ink-soft)">${escapeHtml(p.email)}</p>
+        </div>
+        <div class="grid grid-cols-3 gap-2 mt-6">
+          ${statHtml('Messages', stats.count)}
+          ${statHtml('Reactions', stats.reactionsReceived)}
+          ${statHtml('Days here', stats.daysActive)}
+        </div>
+        <div class="mt-6 flex flex-col gap-4">
+          <label class="flex flex-col gap-1.5 text-sm">
+            <span style="color:var(--ink-soft)">Bio</span>
+            <textarea id="profile-bio-input" maxlength="160" rows="3" class="w-full px-3 py-2 rounded-lg text-sm ssb-input" style="background:var(--surface);border:1.5px solid var(--line);color:var(--ink)">${escapeHtml(draft.bio)}</textarea>
+            <span id="profile-bio-counter" class="text-xs" style="color:var(--ink-soft)">${draft.bio.length}/160</span>
+          </label>
+          <div>
+            <p class="text-sm mb-2" style="color:var(--ink-soft)">Avatar color</p>
+            <div id="profile-color-picker" class="flex flex-wrap gap-2">${colorPickerHtml(draft.avatarColor)}</div>
+          </div>
+          <div>
+            <p class="text-sm mb-2" style="color:var(--ink-soft)">Avatar icon</p>
+            <div id="profile-emoji-picker" class="flex flex-wrap gap-2">${emojiPickerHtml(draft.avatarEmoji)}</div>
+          </div>
+          <div class="flex gap-2">
+            <button type="button" id="profile-save-btn" data-action="save-profile" class="ssb-btn inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium px-4 py-2" style="background:var(--accent);color:var(--ink)">${icon('check', 14)} Save changes</button>
+            <button type="button" data-action="cancel-edit-profile" class="ssb-btn inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium px-4 py-2" style="background:transparent;color:var(--ink-soft)">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+}
+
+async function persistProfilePatch(patch) {
+  const myUid = state.uid;
+  if (!myUid) return;
+  try { await update(ref(db, `users/${myUid}`), patch); } catch { /* ignore */ }
+}
+
+async function saveProfile() {
+  const bioEl = document.getElementById('profile-bio-input');
+  const btn = document.getElementById('profile-save-btn');
+  const bio = (bioEl ? bioEl.value : (state.profileEditDraft.bio || '')).slice(0, 160);
+  if (btn) { btn.disabled = true; btn.innerHTML = `${icon('spinner', 14)} Save changes`; }
+  await persistProfilePatch({ bio, avatarColor: state.profileEditDraft.avatarColor, avatarEmoji: state.profileEditDraft.avatarEmoji });
+  state.profileEditing = false;
+  state.profileEditDraft = null;
+  renderProfileContent();
+}
+
+/* ----------------------------------------------------------------------
+   Settings
+---------------------------------------------------------------------- */
+
+function toggleHtml(checked, action) {
+  return `
+    <button type="button" data-action="${action}" role="switch" aria-checked="${checked}" class="ssb-icon-btn w-11 h-6 rounded-full relative flex-shrink-0 transition-colors" style="background:${checked ? 'var(--accent)' : 'var(--line)'}">
+      <span class="block w-5 h-5 rounded-full absolute top-0.5 transition-transform" style="background:#fff;transform:${checked ? 'translateX(22px)' : 'translateX(2px)'}"></span>
+    </button>
+  `;
+}
+
+function mountSettings() {
+  const p = getProfile();
+  if (!p) { mountAuth(); return; }
+  root.innerHTML = `
+    <div class="${rootClass()}">
+      ${topBarHtml()}
+      <div class="flex flex-1 min-h-0">
+        ${sideNavHtml('settings')}
+        <main class="flex-1 flex flex-col min-h-0">
+          <div id="settings-content" class="flex-1 overflow-y-auto ssb-scroll px-6 py-8"></div>
+        </main>
+      </div>
+      ${bottomNavHtml('settings')}
+    </div>
+  `;
+  renderSettingsContent();
+}
+
+function renderSettingsContent() {
+  const p = getProfile();
+  const el = document.getElementById('settings-content');
+  if (!p || !el) return;
+  el.innerHTML = `
+    <div class="max-w-md mx-auto flex flex-col gap-8">
+      <section>
+        <h3 class="ssb-display font-semibold mb-3" style="font-size:1.05rem">Appearance</h3>
+        <div class="flex items-center justify-between rounded-lg px-4 py-3" style="border:1px solid var(--line)">
+          <span class="text-sm flex items-center gap-2">${icon(p.theme === 'dark' ? 'moon' : 'sun', 16)} Dark mode</span>
+          ${toggleHtml(p.theme === 'dark', 'toggle-theme')}
+        </div>
+      </section>
+      <section>
+        <h3 class="ssb-display font-semibold mb-3" style="font-size:1.05rem">Notifications</h3>
+        <div class="flex items-center justify-between rounded-lg px-4 py-3" style="border:1px solid var(--line)">
+          <span class="text-sm">Message sounds</span>
+          ${toggleHtml(p.soundEnabled !== false, 'toggle-sound')}
+        </div>
+      </section>
+      <section>
+        <h3 class="ssb-display font-semibold mb-3" style="font-size:1.05rem">Account</h3>
+        <div class="rounded-lg px-4 py-3 mb-3 text-sm" style="border:1px solid var(--line);color:var(--ink-soft)">Signed in as ${escapeHtml(p.email)}</div>
+        <form id="password-form" class="flex flex-col gap-3">
+          <label class="flex flex-col gap-1.5 text-sm"><span style="color:var(--ink-soft)">Current password</span>
+            <input id="pw-current" type="password" required class="w-full px-3 py-2 rounded-lg text-sm ssb-input" style="background:var(--surface);border:1.5px solid var(--line);color:var(--ink)" />
+          </label>
+          <label class="flex flex-col gap-1.5 text-sm"><span style="color:var(--ink-soft)">New password</span>
+            <input id="pw-next" type="password" required minlength="6" class="w-full px-3 py-2 rounded-lg text-sm ssb-input" style="background:var(--surface);border:1.5px solid var(--line);color:var(--ink)" />
+          </label>
+          <label class="flex flex-col gap-1.5 text-sm"><span style="color:var(--ink-soft)">Confirm new password</span>
+            <input id="pw-confirm" type="password" required minlength="6" class="w-full px-3 py-2 rounded-lg text-sm ssb-input" style="background:var(--surface);border:1.5px solid var(--line);color:var(--ink)" />
+          </label>
+          <label class="flex items-center gap-2 text-xs" style="color:var(--ink-soft)">
+            <input type="checkbox" id="pw-show" /> Show passwords
+          </label>
+          <div id="pw-error" class="text-sm" style="color:var(--danger)"></div>
+          <div id="pw-success" class="text-sm" style="color:var(--accent-text)"></div>
+          <button id="pw-submit" type="submit" class="ssb-btn inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium px-4 py-2" style="background:transparent;color:var(--ink);border:1.5px solid var(--line)">Update password</button>
+        </form>
+      </section>
+      <section>
+        <h3 class="ssb-display font-semibold mb-3" style="font-size:1.05rem">Legal</h3>
+        <div class="flex flex-col rounded-lg overflow-hidden" style="border:1px solid var(--line)">
+          <button type="button" data-action="show-legal" data-kind="privacy" class="text-left px-4 py-3 text-sm border-b" style="border-color:var(--line)">Privacy policy</button>
+          <button type="button" data-action="show-legal" data-kind="terms" class="text-left px-4 py-3 text-sm">Terms of service</button>
+        </div>
+      </section>
+      <section class="flex flex-col gap-3">
+        <button type="button" data-action="logout" class="ssb-btn w-full inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium px-4 py-2" style="background:transparent;color:var(--danger);border:1.5px solid var(--danger-soft)">${icon('logout', 14)} Log out</button>
+        <p class="text-xs text-center" style="color:var(--ink-soft)">Messages, usernames and profiles in this app are visible to anyone signed in.</p>
+      </section>
+    </div>
+  `;
+  const pwShow = document.getElementById('pw-show');
+  if (pwShow) {
+    pwShow.addEventListener('change', () => {
+      const t = pwShow.checked ? 'text' : 'password';
+      ['pw-current', 'pw-next', 'pw-confirm'].forEach((id) => {
+        const e = document.getElementById(id);
+        if (e) e.type = t;
+      });
+    });
+  }
+}
+
+async function handlePasswordSubmit(form) {
+  const current = document.getElementById('pw-current').value;
+  const next = document.getElementById('pw-next').value;
+  const confirm = document.getElementById('pw-confirm').value;
+  const errEl = document.getElementById('pw-error');
+  const okEl = document.getElementById('pw-success');
+  const btn = document.getElementById('pw-submit');
+  errEl.textContent = '';
+  okEl.textContent = '';
+  if (next.length < 6) { errEl.textContent = 'New password needs at least 6 characters.'; return; }
+  if (next !== confirm) { errEl.textContent = "New passwords don't match."; return; }
+  btn.disabled = true;
+  btn.innerHTML = icon('spinner', 14);
+  try {
+    const cred = EmailAuthProvider.credential(auth.currentUser.email, current);
+    await reauthenticateWithCredential(auth.currentUser, cred);
+    await updatePassword(auth.currentUser, next);
+    okEl.textContent = 'Password updated.';
+    form.reset();
+  } catch (err) {
+    errEl.textContent = friendlyAuthError(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Update password';
+  }
+}
+
+/* ----------------------------------------------------------------------
+   Legal
+---------------------------------------------------------------------- */
+
+function legalP(text) { return `<p class="text-sm mb-2" style="color:var(--ink-soft)">${text}</p>`; }
+function legalH(text) { return `<h3 class="ssb-display font-semibold mt-5 mb-1.5" style="font-size:0.95rem">${text}</h3>`; }
+
+function privacyContentHtml() {
+  return `
+    <div>
+      ${legalP("This app is a small community chat. Here is what it stores about you and why.")}
+      ${legalH("What we collect")}
+      ${legalP("Your username, email address, and anything you add to your profile, like a bio or avatar choice. Your password is handled by Firebase Authentication and never stored in plain text. We also store the messages you post, along with their timestamps, replies and reactions.")}
+      ${legalH("How it's stored")}
+      ${legalP("Your account and the chat both live in this app's Firebase project. Usernames, profiles, messages, reactions and read receipts are visible to anyone signed in to the app.")}
+      ${legalH("What we don't do")}
+      ${legalP("We don't sell your information, and we don't track you outside this app.")}
+      ${legalH("Your choices")}
+      ${legalP("You can update your profile at any time from the Profile page, and change or log out of your account at any time from Settings. If you'd like your data removed entirely, contact whoever runs this app for you.")}
+      ${legalH("Changes")}
+      ${legalP("This policy may be updated as the app changes. Check back here if you want the latest version.")}
+    </div>
+  `;
+}
+
+function termsContentHtml() {
+  return `
+    <div>
+      ${legalP("By creating an account, you agree to these terms.")}
+      ${legalH("Using this app")}
+      ${legalP("This is a shared space. No harassment, hate speech, illegal content or spam. Keep it a place people want to talk in.")}
+      ${legalH("Your account")}
+      ${legalP("Keep your password private. One account per person, and no impersonating someone else.")}
+      ${legalH("Your messages")}
+      ${legalP("You're responsible for what you post. Anything you send is visible to everyone else using the app.")}
+      ${legalH("No guarantees")}
+      ${legalP("This app is provided as is, with no promises about uptime or that your data will be kept indefinitely.")}
+      ${legalH("Changes")}
+      ${legalP("Whoever runs this app can update these terms, remove content, or suspend accounts that break the rules above.")}
+    </div>
+  `;
+}
+
+function renderLegalModal() {
+  const kind = state.legalModalKind;
+  if (!kind) { modalRoot.innerHTML = ''; return; }
+  const title = kind === 'privacy' ? 'Privacy policy' : 'Terms of service';
+  modalRoot.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(17,20,15,0.5)" data-action="close-legal">
+      <div class="w-full max-w-lg overflow-y-auto ssb-scroll rounded-lg p-6" style="background:var(--surface);border:1px solid var(--line);max-height:80vh" data-action="noop">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="ssb-display font-semibold" style="font-size:1.15rem">${title}</h2>
+          <button type="button" data-action="close-legal" class="ssb-icon-btn flex-shrink-0" aria-label="Close">${icon('x', 18)}</button>
+        </div>
+        ${kind === 'privacy' ? privacyContentHtml() : termsContentHtml()}
+      </div>
+    </div>
+  `;
+}
+
+function openLegalModal(kind) {
+  state.legalModalKind = kind;
+  renderLegalModal();
+}
+function closeLegalModal() {
+  state.legalModalKind = null;
+  modalRoot.innerHTML = '';
+}
+
+/* ----------------------------------------------------------------------
+   Navigation / top-level mounting
+---------------------------------------------------------------------- */
+
+function mountLoading() {
+  root.innerHTML = `<div class="ssb-root flex flex-col" style="align-items:center;justify-content:center">${icon('spinner', 22)}</div>`;
+}
+
+function renderTopLevel() {
+  if (!state.uid) { mountAuth(); return; }
+  if (state.view === 'profile') mountProfile();
+  else if (state.view === 'settings') mountSettings();
+  else mountChat();
+}
+
+function navigateTo(view) {
+  if (!state.uid) return;
+  state.view = view;
+  state.menuOpen = false;
+  renderTopLevel();
+}
+
+/* ----------------------------------------------------------------------
+   Firebase live listeners
+---------------------------------------------------------------------- */
+
+function attachLiveListeners() {
+  const usersRef = ref(db, 'users');
+  usersUnsub = onValue(usersRef, (snap) => {
+    state.usersById = snap.val() || {};
+    if (awaitingFirstProfile && state.usersById[state.uid]) {
+      awaitingFirstProfile = false;
+      state.view = 'chat';
+      renderTopLevel();
+    } else if (!awaitingFirstProfile) {
+      if (state.view === 'chat' && document.getElementById('message-list-inner')) renderMessageList();
+      refreshTopBarAvatar();
+    }
+  });
+
+  const liveQuery = query(ref(db, 'messages'), orderByChild('createdAt'), limitToLast(PAGE_SIZE));
+  messagesUnsub = onValue(liveQuery, (snap) => {
+    const val = snap.val() || {};
+    const list = Object.entries(val).map(([id, m]) => ({ id, ...m })).sort((a, b) => a.createdAt - b.createdAt);
+
+    const me = getProfile();
+    if (hasLoadedMessagesOnce && list.length) {
+      const newest = list[list.length - 1];
+      if (newest.id !== lastMsgId && me && newest.uid !== me.uid) {
+        if (me.soundEnabled !== false) playPing();
+      }
+    }
+    if (list.length) lastMsgId = list[list.length - 1].id;
+    hasLoadedMessagesOnce = true;
+
+    const liveIds = new Set(list.map((m) => m.id));
+    const earliestLive = list.length ? list[0].createdAt : Infinity;
+    const olderKept = state.messages.filter((m) => !liveIds.has(m.id) && m.createdAt < earliestLive);
+    state.messages = [...olderKept, ...list].sort((a, b) => a.createdAt - b.createdAt);
+    if (list.length) {
+      state.oldestLoaded = state.oldestLoaded === null ? list[0].createdAt : Math.min(state.oldestLoaded, list[0].createdAt);
+    }
+    if (list.length < PAGE_SIZE) state.hasMore = false;
+
+    if (!awaitingFirstProfile && state.view === 'chat' && document.getElementById('message-list-inner')) {
+      renderMessageList();
+    }
+  });
+
+  const typingRef = ref(db, 'typing');
+  typingUnsub = onValue(typingRef, (snap) => {
+    state.typingMap = snap.val() || {};
+    if (state.view === 'chat' && document.getElementById('typing-label')) updateTypingIndicatorLabel();
+  });
+}
+
+function detachLiveListeners() {
+  if (usersUnsub) { usersUnsub(); usersUnsub = null; }
+  if (messagesUnsub) { messagesUnsub(); messagesUnsub = null; }
+  if (typingUnsub) { typingUnsub(); typingUnsub = null; }
+}
+
+function resetLoggedOutState() {
+  state.uid = null;
+  state.authEmail = null;
+  state.usersById = {};
+  state.messages = [];
+  state.typingMap = {};
+  state.oldestLoaded = null;
+  state.hasMore = true;
+  hasLoadedMessagesOnce = false;
+  lastMsgId = null;
+  state.menuOpen = false;
+  state.replyingTo = null;
+  state.draftText = '';
+  state.reactionPickerId = null;
+  state.readPopoverId = null;
+  state.profileEditing = false;
+  state.profileEditDraft = null;
+  awaitingFirstProfile = false;
+}
+
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    state.uid = user.uid;
+    state.authEmail = user.email;
+    awaitingFirstProfile = true;
+    mountLoading();
+    attachLiveListeners();
+    setTimeout(() => {
+      if (awaitingFirstProfile) {
+        awaitingFirstProfile = false;
+        detachLiveListeners();
+        signOut(auth);
+        state.authError = "Couldn't load your profile. Try logging in again.";
+      }
+    }, 8000);
+  } else {
+    detachLiveListeners();
+    resetLoggedOutState();
+    state.view = 'auth';
+    mountAuth();
+  }
+});
+
+/* ----------------------------------------------------------------------
+   Event delegation
+---------------------------------------------------------------------- */
+
+document.addEventListener('click', (e) => {
+  const target = e.target.closest('[data-action]');
+  if (!target) return;
+  const action = target.dataset.action;
+  switch (action) {
+    case 'noop':
+      break;
+    case 'switch-auth-mode':
+      switchAuthMode(target.dataset.mode);
+      break;
+    case 'toggle-password-visibility':
+      togglePasswordVisibility();
+      break;
+    case 'reset-password':
+      handleResetPassword();
+      break;
+    case 'show-legal':
+      openLegalModal(target.dataset.kind);
+      break;
+    case 'close-legal':
+      closeLegalModal();
+      break;
+    case 'nav':
+      navigateTo(target.dataset.view);
+      break;
+    case 'toggle-account-menu':
+      toggleAccountMenu();
+      break;
+    case 'logout':
+      handleLogout();
+      break;
+    case 'reply': {
+      const msg = state.messages.find((m) => m.id === target.dataset.id);
+      if (msg) { state.replyingTo = msg; updateReplyPreview(); }
+      break;
+    }
+    case 'cancel-reply':
+      state.replyingTo = null;
+      updateReplyPreview();
+      break;
+    case 'toggle-reaction-picker': {
+      const id = target.dataset.id;
+      state.reactionPickerId = state.reactionPickerId === id ? null : id;
+      renderMessageList();
+      break;
+    }
+    case 'react': {
+      const msgId = target.dataset.msgId;
+      const emoji = target.dataset.emoji;
+      if (target.dataset.closePicker) state.reactionPickerId = null;
+      handleToggleReaction(msgId, emoji);
+      if (target.dataset.closePicker) renderMessageList();
+      break;
+    }
+    case 'toggle-read-popover': {
+      const id = target.dataset.id;
+      state.readPopoverId = state.readPopoverId === id ? null : id;
+      renderMessageList();
+      break;
+    }
+    case 'scroll-to-message':
+      scrollToMessage(target.dataset.id);
+      break;
+    case 'load-older':
+      loadOlderMessages();
+      break;
+    case 'edit-profile':
+      state.profileEditing = true;
+      state.profileEditDraft = null;
+      renderProfileContent();
+      break;
+    case 'cancel-edit-profile':
+      state.profileEditing = false;
+      state.profileEditDraft = null;
+      renderProfileContent();
+      break;
+    case 'save-profile':
+      saveProfile();
+      break;
+    case 'pick-avatar-color': {
+      const bioEl = document.getElementById('profile-bio-input');
+      if (bioEl && state.profileEditDraft) state.profileEditDraft.bio = bioEl.value;
+      state.profileEditDraft.avatarColor = target.dataset.color;
+      document.getElementById('profile-color-picker').innerHTML = colorPickerHtml(state.profileEditDraft.avatarColor);
+      const p = getProfile();
+      document.getElementById('profile-avatar-preview').innerHTML = avatarHtml(p.username, state.profileEditDraft.avatarColor, state.profileEditDraft.avatarEmoji, 84);
+      break;
+    }
+    case 'pick-avatar-emoji': {
+      const bioEl = document.getElementById('profile-bio-input');
+      if (bioEl && state.profileEditDraft) state.profileEditDraft.bio = bioEl.value;
+      state.profileEditDraft.avatarEmoji = target.dataset.emoji;
+      document.getElementById('profile-emoji-picker').innerHTML = emojiPickerHtml(state.profileEditDraft.avatarEmoji);
+      const p2 = getProfile();
+      document.getElementById('profile-avatar-preview').innerHTML = avatarHtml(p2.username, state.profileEditDraft.avatarColor, state.profileEditDraft.avatarEmoji, 84);
+      break;
+    }
+    case 'toggle-theme': {
+      const p = getProfile();
+      persistProfilePatch({ theme: p.theme === 'dark' ? 'light' : 'dark' }).then(() => {
+        refreshRootDarkClass();
+        renderSettingsContent();
+      });
+      break;
+    }
+    case 'toggle-sound': {
+      const p = getProfile();
+      persistProfilePatch({ soundEnabled: !(p.soundEnabled !== false) }).then(renderSettingsContent);
+      break;
+    }
+    default:
+      break;
+  }
+});
+
+document.addEventListener('submit', (e) => {
+  if (e.target && e.target.id === 'auth-form') {
+    e.preventDefault();
+    handleAuthSubmit(e.target);
+  } else if (e.target && e.target.id === 'composer-form') {
+    e.preventDefault();
+    handleSend();
+  } else if (e.target && e.target.id === 'password-form') {
+    e.preventDefault();
+    handlePasswordSubmit(e.target);
+  }
+});
+
+document.addEventListener('input', (e) => {
+  if (e.target && e.target.id === 'composer-textarea') {
+    state.draftText = e.target.value;
+    const sendBtn = document.getElementById('composer-send');
+    if (sendBtn) sendBtn.disabled = !e.target.value.trim() || state.sending;
+    handleTypingActivity();
+  }
+  if (e.target && e.target.id === 'profile-bio-input') {
+    const counter = document.getElementById('profile-bio-counter');
+    if (counter) counter.textContent = `${e.target.value.length}/160`;
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.target && e.target.id === 'composer-textarea' && e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    handleSend();
+  }
+  if (e.key === 'Escape' && state.legalModalKind) closeLegalModal();
+});
+
+/* ----------------------------------------------------------------------
+   Init
+---------------------------------------------------------------------- */
+
+mountLoading();
+</script>
+</body>
+</html>
